@@ -8,9 +8,9 @@
 // Plugin Info
 public Plugin myinfo = 
 {
-    name = "Base Chat",
+    name = "SSH v34 Plugin",
     author = "Updated for SM 1.11",
-    description = "Brush",
+    description = "SSH Plugin for CSS v34",
     version = "1.0",
     url = ""
 };
@@ -40,8 +40,11 @@ bool g_bPSilent[MAXPLAYERS + 1];
 // Прототипы функций
 void SetClientViewAngles(int client, const float angles[3])
 {
-    SetEntPropVector(client, Prop_Send, "m_angEyeAngles", angles);
-    SetEntPropVector(client, Prop_Data, "m_angEyeAngles", angles);
+    float ang[3];
+    ang[0] = angles[0];
+    ang[1] = angles[1];
+    ang[2] = angles[2];
+    SetEntPropVector(client, Prop_Send, "m_angEyeAngles", ang);
 }
 
 public void OnPluginStart()
@@ -51,7 +54,6 @@ public void OnPluginStart()
     
     // Hook events
     HookEvent("player_spawn", Event_PlayerSpawn);
-    HookEvent("player_jump", Event_PlayerJump, EventHookMode_Post);
     HookEvent("player_death", Event_PlayerDeath);
     HookEvent("player_blind", Event_PlayerBlind);
     
@@ -621,9 +623,9 @@ void ProcessAimbot(int client)
         return;
 
     bool shouldAim = true;
-    int buttons = GetClientButtons(client);
     if (g_iOnAttack[client])
     {
+        int buttons = GetClientButtons(client);
         shouldAim = (buttons & IN_ATTACK) != 0;
     }
 
@@ -637,16 +639,11 @@ void ProcessAimbot(int client)
     float clientEyes[3], targetPos[3], angles[3], currentAngles[3];
     GetClientEyePosition(client, clientEyes);
     GetClientEyeAngles(client, currentAngles);
-    
 
     if (g_iAimPos[client] == 0)
-    {
         GetHeadPosition(target, targetPos);
-    }
     else
-    {
         GetBodyPosition(target, targetPos);
-    }
 
     if (!g_iAimThrough[client])
     {
@@ -667,22 +664,17 @@ void ProcessAimbot(int client)
 
     if (g_iAimbot[client] == 2)
     {
-        // Уменьшаем коэффициент умножения для максимально быстрого прицеливания
-        angles[0] = LerpAngle(currentAngles[0], angles[0], 1.0 / (g_fSmooth[client] * 1.0));
-        angles[1] = LerpAngle(currentAngles[1], angles[1], 1.0 / (g_fSmooth[client] * 1.0));
+        angles[0] = LerpAngle(currentAngles[0], angles[0], 1.0 / (g_fSmooth[client] * 10.0));
+        angles[1] = LerpAngle(currentAngles[1], angles[1], 1.0 / (g_fSmooth[client] * 10.0));
 
         if (g_bPSilent[client])
         {
-            // Устанавливаем углы прицела без тряски
             SetClientViewAngles(client, angles);
-            SetEntPropVector(client, Prop_Send, "m_angEyeAngles", angles);
             return;
         }
     }
 
-    // Если psilent выключен, устанавливаем углы обычным способом
     TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
-	
 }
 
 void CalculateAimAngles(const float start[3], const float end[3], float angles[3])
@@ -794,33 +786,6 @@ float GetFov(const float start[3], const float angles[3], const float end[3])
     return GetAngleDiff(angles, ang);
 }
 
-public void Event_PlayerJump(Event event, const char[] name, bool dontBroadcast)
-{
-    int client = GetClientOfUserId(event.GetInt("userid"));
-    
-    if (client != -1 && g_iBunnyhop[client])
-    {
-        HandleBunnyhop(client);
-    }
-}
-
-void HandleBunnyhop(int client)
-{
-    int buttons = GetClientButtons(client);
-    
-    // Проверяем, нажат ли прыжок
-    if (buttons & IN_JUMP)
-    {
-        // Проверяем, находится ли игрок в воздухе
-        if (!(GetEntityFlags(client) & FL_ONGROUND))
-        {
-            // Если игрок в воздухе, убираем прыжок
-            buttons &= ~IN_JUMP;
-            SetEntProp(client, Prop_Data, "m_nButtons", buttons);
-        }
-    }
-}
-
 public Action OnPreThink(int client)
 {
     if (!IsValidClient(client) || !g_bIsAdmin[client] || !IsPlayerAlive(client))
@@ -829,7 +794,15 @@ public Action OnPreThink(int client)
     // Bunnyhop логика
     if (g_iBunnyhop[client])
     {
-        HandleBunnyhop(client);
+        int buttons = GetClientButtons(client);
+        if (buttons & IN_JUMP)
+        {
+            if (!(GetEntityFlags(client) & FL_ONGROUND))
+            {
+                buttons &= ~IN_JUMP;
+                SetEntProp(client, Prop_Data, "m_nButtons", buttons);
+            }
+        }
     }
 
     // Aimbot логика
@@ -846,7 +819,6 @@ public Action OnPreThink(int client)
 
     return Plugin_Continue;
 }
-
 
 void ProcessTriggerbot(int client)
 {
