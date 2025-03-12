@@ -21,7 +21,7 @@ int g_iFlashAlpha = -1;
 float TakeDmg[65];
 float ChanceToTakeDmg[65];
 int Triggerbot[65];
-bool Aimbot[65];
+int Aimbot[65];
 int AimbotMulti[65];
 int OnAttack[65];
 int NoFallDmg[65];
@@ -40,7 +40,7 @@ float All[65][14];
 float HeadChance[65];
 int HeadChanceF[65];
 float view_angles[65][3];
-int aimbot_event;
+int aimbot_event = -1;
 #define FLOAT_PI 3.14159265359
 
 public Plugin myinfo = 
@@ -65,7 +65,7 @@ public void OnPluginStart()
     // Изменяем регистрацию событий
     HookEvent("player_blind", Event_PlayerBlind);
     HookEvent("player_spawn", Event_PlayerSpawn);
-	HookEvent("player_death", Event_PlayerDeath, EventHookMode_Post);
+	HookEvent("player_death", Event_PlayerDeath, EventHookMode_Pre);
     HookEvent("weapon_fire", Event_WeaponFire);
     
     RegConsoleCmd("ssh_weapon", Command_ModAttribute, "");
@@ -80,6 +80,8 @@ public void OnPluginStart()
     RegConsoleCmd("ssh_info", Command_ModInfo, "");
     RegConsoleCmd("say", Command_Say, "");
     RegConsoleCmd("say_team", Command_Say, "");
+    
+    aimbot_event = -1;
     
     InitializeArrays();
     InitializeWeaponData();
@@ -157,15 +159,17 @@ public void OnClientPutInServer(int client)
     if(!IsValidClient(client))
         return;
         
+         
+        
     SDKHook(client, SDKHook_PostThinkPost, OnPostThinkPost);
     SDKHook(client, SDKHook_OnTakeDamage, OnTakeDamage);
     SDKHook(client, SDKHook_WeaponEquip, OnWeaponEquip); // Изменено имя функции
     SDKHook(client, SDKHook_WeaponSwitch, OnWeaponSwitch); // Изменено имя функции
-    SDKHook(client, SDKHook_FireBulletsPost, OnFireBullets);
+//    SDKHook(client, SDKHook_FireBulletsPost, OnFireBullets);
     HeadChance[client] = 1.0; // Устанавливаем значение по умолчанию
     HeadChanceF[client] = 0;
-    
     Smooth[client] = 1.0;
+    aimbot_event = -1;
 }
 
 public void OnClientDisconnect(int client)
@@ -209,21 +213,30 @@ public Action Event_PlayerBlind(Event event, const char[] name, bool dontBroadca
     return Plugin_Continue;
 }
 
-public Action Event_PlayerDeath(Handle event, const char[] name, bool dontBroadcast)
+public Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast)
 {
-    int client = GetClientOfUserId(GetEventInt(event, "userid"));
-    int client2 = GetClientOfUserId(GetEventInt(event, "attacker"));
+    int victim = GetClientOfUserId(event.GetInt("userid"));
+    int attacker = GetClientOfUserId(event.GetInt("attacker"));
     
-    if (aimbot_event == client && HeadChanceF[client2] == 1)
+    PrintToServer("[DEBUG] Death Event: victim=%d, attacker=%d, HeadChanceF=%d, Aimbot=%d", 
+        victim, attacker, HeadChanceF[attacker], Aimbot[attacker]);
+    
+    if(HeadChanceF[attacker] == 1)
     {
-        EmitSoundToAll("player/headshot1.wav", client, 2, 326, 0, 1.0, 100, -1, NULL_VECTOR, NULL_VECTOR, true, 0.0);
-        SetEventBool(event, "headshot", true);
-        aimbot_event = -1;
-        HeadChanceF[client2] = 0;
+        if(Aimbot[attacker] == 2)
+        {
+            event.SetBool("headshot", true);
+            event.SetInt("hitgroup", 1);
+            EmitSoundToAll("player/headshot1.wav", victim, 2, 326, 0, 1.0, 100, -1, NULL_VECTOR, NULL_VECTOR, true, 0.0);
+        }
+        
+        HeadChanceF[attacker] = 0;
+        PrintToServer("[DEBUG] Death Event: Headshot confirmed! Victim=%d, Attacker=%d", victim, attacker);
+        return Plugin_Changed;
     }
+    
     return Plugin_Continue;
 }
-
 public void OnClientPostAdminCheck(int client)
 {
     if(IsFakeClient(client) || !IsClientConnected(client))
@@ -304,35 +317,28 @@ public Action Command_ModAim(int client, int args)
     
     if(GetCmdArgs() != 2)
     {
-        Aimbot[client] = StringToInt(AttributeValue1);
+        // Только включение/выключение аимбота
+        Aimbot[client] = view_as<bool>(StringToInt(AttributeValue1));
     }
     else
     {
+        // Настройка параметров
         GetCmdArg(2, AttributeValue2, sizeof(AttributeValue2));
         
         if(StrEqual("fov", AttributeValue1, false))
         {
-            aFov[client] = StringToFloat(AttributeValue2);
+            All[client][8] = StringToFloat(AttributeValue2);
+            aFov[client] = All[client][8];
         }
         else if(StrEqual("smooth", AttributeValue1, false))
         {
-            float smoothValue = StringToFloat(AttributeValue2);
-            if(smoothValue >= 1.0)
-            {
-                Smooth[client] = smoothValue;
-            }
-        }
-        else if(StrEqual("onattack", AttributeValue1, false))
-        {
-            OnAttack[client] = StringToInt(AttributeValue2);
-        }
-        else if(StrEqual("through", AttributeValue1, false))
-        {
-            AimT[client] = StringToInt(AttributeValue2);
+            All[client][9] = StringToFloat(AttributeValue2);
+            Smooth[client] = All[client][9];
         }
         else if(StrEqual("chance", AttributeValue1, false))
         {
-            AimChance[client] = StringToFloat(AttributeValue2);
+            All[client][10] = StringToFloat(AttributeValue2);
+            AimChance[client] = All[client][10];
         }
         else if(StrEqual("hs_chance", AttributeValue1, false))
         {
@@ -342,16 +348,9 @@ public Action Command_ModAim(int client, int args)
         {
             AimbotMulti[client] = StringToInt(AttributeValue2);
         }
-        else if(StrEqual("pos", AttributeValue1, false))
+        else if(StrEqual("through", AttributeValue1, false))
         {
-            if(StrEqual("head", AttributeValue2, false))
-            {
-                AimPos[client] = 0;
-            }
-            else if(StrEqual("normal", AttributeValue2, false))
-            {
-                AimPos[client] = 1;
-            }
+            AimT[client] = StringToInt(AttributeValue2);
         }
     }
     
@@ -549,13 +548,19 @@ float CalculateDamage(int victim, int attacker, float damage, int damagetype)
 public Action Event_WeaponFire(Event event, const char[] name, bool dontBroadcast)
 {
     int client = GetClientOfUserId(event.GetInt("userid"));
+    
     if(!IsValidClient(client) || !IsAdmin[client])
         return Plugin_Continue;
     
-    char weapon[64];
-    event.GetString("weapon", weapon, sizeof(weapon));
-    
-    ProcessWeaponFire(client, weapon);
+    // Проверяем значение Aimbot
+    if(Aimbot[client] == 2)
+    {
+        if(GetRandomFloat(0.0, 1.0) <= HeadChance[client])
+        {
+            HeadChanceF[client] = 1;
+            PrintToServer("[DEBUG] WeaponFire: InstantKill Headshot ready for client %d, HeadChanceF=%d", client, HeadChanceF[client]);
+        }
+    }
     
     return Plugin_Continue;
 }
@@ -566,7 +571,9 @@ void ProcessWeaponFire(int client, const char[] weapon)
         return;
     
     float punchAngle[3];
-    GetEntPropVector(client, Prop_Send, "m_aimPunchAngle", punchAngle);
+    
+    // Меняем на m_vecPunchAngle для CS:S
+    GetEntPropVector(client, Prop_Send, "m_vecPunchAngle", punchAngle);
     
     if(All[client][0] != -1.0)
     {
@@ -574,7 +581,8 @@ void ProcessWeaponFire(int client, const char[] weapon)
         {
             punchAngle[i] *= All[client][0];
         }
-        SetEntPropVector(client, Prop_Send, "m_aimPunchAngle", punchAngle);
+        
+        SetEntPropVector(client, Prop_Send, "m_vecPunchAngle", punchAngle);
     }
 }
 
@@ -756,13 +764,19 @@ public Action OnWeaponSwitch(int client, int weapon)
 
 public Action OnFireBullets(int client)
 {
+    PrintToServer("[DEBUG] OnFireBullets: start for client %d, HeadChance=%f", client, HeadChance[client]);
+    
     if(!IsValidClient(client) || !IsAdmin[client])
         return Plugin_Continue;
+    
+    float randomValue = GetRandomFloat(0.0, 1.0);
+    PrintToServer("[DEBUG] OnFireBullets: random=%f, HeadChance=%f", randomValue, HeadChance[client]);
         
-    if(GetRandomFloat(0.0, 1.0) <= HeadChance[client])
+    if(randomValue <= HeadChance[client])
     {
         HeadChanceF[client] = 1;
         aimbot_event = client;
+        PrintToServer("[DEBUG] OnFireBullets: Headshot activated! HeadChanceF=%d, aimbot_event=%d", HeadChanceF[client], aimbot_event);
     }
     
     return Plugin_Continue;
@@ -1117,85 +1131,80 @@ public float GetDmg(int client, int cnt)
     return ret;
 }
 
-public Action EventWeaponFire(Handle event, const char[] name, bool dontBroadcast)
+public Action EventWeaponFire(Event event, const char[] name, bool dontBroadcast)
 {
-    int client = GetClientOfUserId(GetEventInt(event, "userid"));
+    int client = GetClientOfUserId(event.GetInt("userid"));
     
-    // Обработка NoFlash
-    if (IsAdmin[client] && g_iNoFlash[client])
-    {
-        SetEntDataFloat(client, g_iFlashAlpha, 0.5, false);
-    }
-    
-    int g_iTeamOffset = FindSendPropOffs("CCSPlayer", "m_iTeamNum");
+    if(!IsValidClient(client) || !IsAdmin[client])
+        return Plugin_Continue;
+
     float angles[3];
     angles = view_angles[client];
-    
-    // Обработка Aimbot
-    if (Aimbot[client])
+
+    if(Aimbot[client])
     {
-        for (int i = 0; i < AimbotMulti[client]; i++)
+        // Проверяем шанс срабатывания
+        if(GetRandomFloat(0.0, 1.0) > AimChance[client])
+            return Plugin_Continue;
+
+        // Для мультитаргета
+        int maxTargets = AimbotMulti[client];
+        for(int i = 0; i < maxTargets; i++)
         {
-            for (int cnt = 1; cnt <= MaxClients; cnt++)
+            // Перебираем игроков
+            for(int target = 1; target <= MaxClients; target++)
             {
-                if (IsClientInGame(cnt))
+                if(!IsClientInGame(target) || !IsPlayerAlive(target))
+                    continue;
+
+                // Проверяем команду
+                if(GetClientTeam(target) == GetClientTeam(client))
+                    continue;
+
+                if(target == client)
+                    continue;
+
+                float clientPos[3], targetPos[3], aimAngles[3];
+                GetClientEyePosition(client, clientPos);
+                GetClientEyePosition(target, targetPos);
+
+                // Проверка на стены
+                if(!AimT[client])
                 {
-                    int t1 = GetEntData(client, g_iTeamOffset, 4);
-                    int t2 = GetEntData(cnt, g_iTeamOffset, 4);
-                    
-                    if (!IsClientObserver(cnt) && IsPlayerAlive(cnt) && 
-                        t2 != t1 && (t2 == 2 || t2 == 3) && client != cnt)
-                    {
-                        float p1[3], p2[3], p3[3];
-                        GetClientEyePosition(client, p1);
-                        GetClientEyePosition(cnt, p2);
-                        
-                        TR_TraceRayFilter(p1, p2, MASK_SHOT, RayType_EndPoint, TraceRayDontHitSelf, client);
-                        
-                        if (TR_GetFraction() >= 0.97 || cnt == TR_GetEntityIndex() || AimT[client])
-                        {
-                            float delta[3];
-                            delta[0] = p1[0] - p2[0];
-                            delta[1] = p1[1] - p2[1];
-                            delta[2] = p1[2] - p2[2];
-                            
-                            float hyp = SquareRoot(delta[0] * delta[0] + delta[1] * delta[1]);
-                            p3[0] = ArcTangent(delta[2] / hyp) * 180.0 / 3.141;
-                            p3[1] = ArcTangent(delta[1] / delta[0]) * 180.0 / 3.141;
-                            p3[2] = 0.0;
-                            
-                            if (delta[0] >= 0.0)
-                            {
-                                p3[1] += 180.0;
-                            }
-                            
-                            if (FloatAbs(p3[0] - angles[0]) <= aFov[client] && 
-                                FloatAbs(p3[1] - angles[1]) <= aFov[client])
-                            {
-                                if (Aimbot[client] == 2)
-    {
-        int dmgt = 2;
-        aimbot_event = cnt;
-        
-        if (GetRandomFloat(0.0, 1.0) > HeadChance[client])
-        {
-            HeadChanceF[client] = 0;
-        }
-        else
-        {
-            HeadChanceF[client] = 1;
-        }
-        
-        if (AimChance[client] >= GetRandomFloat(0.0, 1.0))
-        {
-            SDKHooks_TakeDamage(cnt, client, client, GetDmg(client, cnt), dmgt, -1, NULL_VECTOR, NULL_VECTOR);
-            i++;
-        }
-                                }
-                            }
-                        }
-                    }
+                    TR_TraceRayFilter(clientPos, targetPos, MASK_SHOT, RayType_EndPoint, TraceRayDontHitSelf, client);
+                    if(TR_GetFraction() < 1.0 && TR_GetEntityIndex() != target)
+                        continue;
                 }
+
+                // Вычисляем углы
+                float delta[3];
+                SubtractVectors(targetPos, clientPos, delta);
+                GetVectorAngles(delta, aimAngles);
+
+                // Проверяем FOV
+                if(FloatAbs(aimAngles[0] - angles[0]) > aFov[client] || 
+                   FloatAbs(aimAngles[1] - angles[1]) > aFov[client])
+                    continue;
+
+                // Если аимбот = 2, проверяем шанс хедшота
+                if(Aimbot[client] == 2)
+                {
+                    aimbot_event = target;
+                    HeadChanceF[client] = (GetRandomFloat(0.0, 1.0) <= HeadChance[client]) ? 1 : 0;
+                }
+
+                // Применяем сглаживание если оно включено
+                if(Smooth[client] > 1.0)
+                {
+                    float smoothAngles[3];
+                    SubtractVectors(aimAngles, angles, smoothAngles);
+                    NormalizeAngles(smoothAngles);
+                    ScaleVector(smoothAngles, 1.0 / Smooth[client]);
+                    AddVectors(angles, smoothAngles, aimAngles);
+                }
+
+                TeleportEntity(client, NULL_VECTOR, aimAngles, NULL_VECTOR);
+                break;
             }
         }
     }
